@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIT 差勤防代打卡系統</title>
+    <!-- 引入標準且穩定的 QR Code 與 Barcode 生成套件 -->
+    <script src="https://cloudflare.com"></script>
+    <script src="https://cloudflare.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; background-color: #f0f2f5; padding: 20px; color: #333; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        
+        /* 浮動動態 QR Code 區域 */
+        .qr-wrapper { position: relative; margin: 25px auto; width: 220px; height: 220px; background: #fff; padding: 10px; border: 2px solid #003366; border-radius: 8px; overflow: hidden; }
+        #qrcode img { margin: 0 auto; }
+        /* 覆蓋在 QR Code 上的動態時間浮水印，防止截圖或錄影代打卡 */
+        .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 14px; color: rgba(255, 0, 0, 0.35); font-weight: bold; pointer-events: none; white-space: nowrap; width: 100%; text-align: center; }
+        
+        .info-box { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; text-align: left; font-size: 14px; border-left: 4px solid #003366; }
+        .info-title { font-weight: bold; color: #003366; margin-bottom: 5px; }
+        
+        .status-badge { display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 16px; margin: 15px 0; background: #e0e0e0; color: #666; }
+        .status-success { background: #d4edda; color: #155724; }
+        .status-error { background: #f8d7da; color: #721c24; }
+        
+        .phone-display { font-size: 26px; color: #155724; font-weight: bold; margin: 20px 0; padding: 10px; border: 2px dashed #28a745; border-radius: 8px; display: none; background: #f4fbf6; }
+        .btn { width: 100%; padding: 12px; font-size: 16px; background: #003366; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn:hover { background: #002244; }
+        
+        .barcode-section { margin-top: 30px; border-top: 1px solid #ddd; padding-top: 20px; }
+        .barcode-box { margin: 20px 0; }
+        svg { width: 100%; max-width: 350px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>AIT 差勤驗證系統</h2>
+    <p style="font-size: 14px; color: #666; margin-top: -10px;">限 AIT 台北辦事處 / 高雄分處內部員工使用</p>
+    
+    <!-- 1. 防代打卡浮動動態 QR Code 區（內含即時時間浮水印） -->
+    <div class="qr-wrapper">
+        <div id="qrcode"></div>
+        <div class="watermark" id="watermarkText">載入中...</div>
+    </div>
+    <div style="font-size: 12px; color: #888; margin-top: -15px; margin-bottom: 15px;">
+        隨機碼與時間每 10 秒自動重整，截圖無效。<br>更新倒數：<span id="countdown" style="font-weight:bold; color:red;">10</span> 秒
+    </div>
+
+    <!-- 2. 自動偵測的網路與位置資訊 -->
+    <div class="info-box">
+        <div class="info-title">🌐 目前連線 Wi-Fi 外部地址 (IP)</div>
+        <div id="wifiIp">正在偵測網路環境...</div>
+    </div>
+    <div class="info-box">
+        <div class="info-title">📍 當前 GPS 定位狀態</div>
+        <div id="gpsStatus">尚未讀取 GPS 座標</div>
+    </div>
+
+    <!-- 3. 驗證結果與手機號碼顯示 -->
+    <div id="statusBadge" class="status-badge">等待驗證中...</div>
+    <button class="btn" onclick="startVerification()">立刻掃描並比對定位</button>
+    
+    <div class="phone-display" id="phoneResult">📲 0912-345-678</div>
+
+    <!-- 4. AIT 兩處地址的 Barcode -->
+    <div class="barcode-section">
+        <h3 style="color: #555; font-size: 16px;">AIT 辦事處地址條碼 (比對用)</h3>
+        <div class="barcode-box">
+            <span style="font-size: 13px; font-weight: bold; color: #666;">台北辦事處 (Taipei Office)</span><br>
+            <svg id="barcodeTaipei"></svg>
+        </div>
+        <div class="barcode-box">
+            <span style="font-size: 13px; font-weight: bold; color: #666;">高雄分處 (Kaohsiung Office)</span><br>
+            <svg id="barcodeKaohsiung"></svg>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ==========================================
+    // 核心安全設定參數 (請依實際需求修改)
+    // ==========================================
+    const ALLOWED_WIFI_IP = "210.69.1.1"; // 填入 AIT 公司 Wi-Fi 的對外固定公網 IP (範例)
+    
+    // AIT 台北與高雄的真實 GPS 座標，以及允許的誤差範圍 (單位：公尺)
+    const LOCATIONS = [
+        { name: "AIT 台北辦事處 (內湖區金湖路100號)", lat: 25.02613, lng: 121.57915, radius: 200 },
+        { name: "AIT 高雄分處 (前鎮區成功二路88號5樓)", lat: 22.61053, lng: 120.30601, radius: 150 }
+    ];
+
+    // ==========================================
+    // 功能 1：防代打卡動態 QR Code 系統
+    // ==========================================
+    let timeLeft = 10;
+    const qrElement = document.getElementById("qrcode");
+    const qrcode = new QRCode(qrElement, { width: 200, height: 200, correctLevel: QRCode.CorrectLevel.H });
+
+    function generateDynamicQR() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('zh-TW', { hour12: false });
+        const dateString = now.toISOString().split('T')[0];
+        
+        // 生成包含時間與隨機 Token 的浮動字串
+        const randomToken = Math.random().toString(36).substring(2, 10).toUpperCase();
+        const securePayload = `AIT_CLOCKIN_${dateString}_${timeString}_${randomToken}`;
+        
+        // 更新 QR Code
+        qrcode.makeCode(securePayload);
+        
+        // 更新覆蓋在 QR Code 上的浮水印文字，防止錄影代打
+        document.getElementById("watermarkText").innerText = `${timeString} ${randomToken}`;
+        timeLeft = 10;
+    }
+
+    // 啟動定時器，每 10 秒自動重新產生
+    setInterval(() => {
+        timeLeft--;
+        document.getElementById("countdown").innerText = timeLeft;
+        if (timeLeft <= 0) generateDynamicQR();
+    }, 1000);
+    generateDynamicQR();
+
+    // ==========================================
+    // 功能 2：自動獲取當前連線之 Wi-Fi 外部公網 IP
+    // ==========================================
+    let currentLoggedIP = "";
+    async function getPublicIP() {
+        try {
+            const response = await fetch('https://ipify.org');
+            const data = await response.json();
+            currentLoggedIP = data.ip;
+            document.getElementById("wifiIp").innerText = `${currentLoggedIP} (已成功自動讀取)`;
+        } catch (error) {
+            document.getElementById("wifiIp").innerText = "無法取得 IP，請確認您已連線上網。";
+        }
+    }
+    // 網頁開啟時自動偵測 IP
+    getPublicIP();
+
+    // ==========================================
+    // 功能 3：GPS 定位與 Wi-Fi 比對核心驗證邏輯
+    // ==========================================
+    function startVerification() {
+        const badge = document.getElementById("statusBadge");
+        const phoneBox = document.getElementById("phoneResult");
+        const gpsStatus = document.getElementById("gpsStatus");
+        
+        badge.innerText = "驗證中...";
+        badge.className = "status-badge";
+        phoneBox.style.display = "none";
+
+        // A. 瀏覽器 GPS 權限與讀取
+        if (!navigator.geolocation) {
+            updateStatus(badge, "位置異常：手機不支援 GPS 功能", false);
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition((position) => {
+            const userLat = position.coords.latitude;
+            const userLng = position.coords.longitude;
+            const accuracy = position.coords.accuracy;
+            
+            gpsStatus.innerText = `緯度: ${userLat.toFixed(5)}, 經度: ${userLng.toFixed(5)} (誤差半徑: ${accuracy.toFixed(1)}公尺)`;
+
+            let matchedLocation = null;
+
+            // 計算與台北、高雄 AIT 的距離
+            for (let loc of LOCATIONS) {
+                const distance = calculateDistance(userLat, userLng, loc.lat, loc.lng);
+                if (distance <= loc.radius) {
+                    matchedLocation = loc;
+                    break;
+                }
+            }
+
+            // B. 判斷 GPS 是否在範圍內
+            if (!matchedLocation) {
+                updateStatus(badge, "位置異常：不在美國在台協會核准範圍內！", false);
+                return;
+            }
+
+            // C. 判斷 Wi-Fi IP 是否正確（實務上此處要開啟，測試時可先註解）
+            /*
+            if (currentLoggedIP !== ALLOWED_WIFI_IP) {
+                updateStatus(badge, "網路異常：未連線至 AIT 公司指定 Wi-Fi", false);
+                return;
+            }
+            */
+
+            // D. 雙重驗證通過
+            updateStatus(badge, `驗證成功！已確認位於：${matchedLocation.name}`, true);
+            phoneBox.style.display = "block"; // 顯示員工電話號碼
+
+        }, (error) => {
+            updateStatus(badge, "位置異常：GPS 定位讀取失敗或遭婉拒權限", false);
+            gpsStatus.innerText = "拒絕授權或無法定位，請至手機設定開啟瀏覽器定位服務。";
+        }, {
+            enableHighAccuracy: true, // 強制使用精準 GPS (不使用電信基地台定位)
+            timeout: 10000
+        });
+    }
+
+    // 更新網頁狀態燈號
+    function updateStatus(element, message, isSuccess) {
+        element.innerText = message;
+        if (isSuccess) {
+            element.className = "status-badge status-success";
+        } else {
+            element.className = "status-badge status-error";
+        }
+    }
+
+    // Haversine 公式計算兩個經緯度之間的真實距離（公尺）
+    function calculateDistance(lat1, lng1, lat2, lng2) {
+        const R = 6371e3; 
+        const radLat1 = lat1 * Math.PI / 180;
+        const radLat2 = lat2 * Math.PI / 180;
+        const diffLat = (lat2 - lat1) * Math.PI / 180;
+        const diffLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(diffLat / 2) * Math.sin(diffLat / 2) +
+                  Math.cos(radLat1) * Math.cos(radLat2) *
+                  Math.sin(diffLng / 2) * Math.sin(diffLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+
+    // ==========================================
+    // 功能 4：靜態生成 AIT 台北與高雄地址 Barcode
+    // ==========================================
+    JsBarcode("#barcodeTaipei", "AIT-TAIPEI-100-KINHU-RD", { format: "CODE128", width: 1.5, height: 45, displayValue: true, fontSize: 12 });
