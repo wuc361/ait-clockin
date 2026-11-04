@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIT 差勤驗證</title>
     <!-- 引入穩定的 QR Code 產生套件 -->
-    <script src="https://cloudflare.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding: 20px; }
         .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -50,14 +50,18 @@
 
     // 網頁載入完成後初始化
     window.onload = function() {
-        qrcodeObj = new QRCode(document.getElementById("qrcode"), { width: 200, height: 200 });
+        qrcodeObj = new QRCode(document.getElementById("qrcode"), {
+    text: "AIT_SECURE_INIT",
+    width: 200,
+    height: 200
+});
         
         // 啟動每 10 秒更新動態 QR Code
         setInterval(updateQR, 10000);
         updateQR();
         
         // 抓取外部 IP
-        fetch('https://ipify.org')
+        fetch('https://api.ipify.org?format=json')
             .then(res => res.json())
             .then(data => { document.getElementById("wifiIp").innerText = data.ip; })
             .catch(() => { document.getElementById("wifiIp").innerText = "無法取得 IP"; });
