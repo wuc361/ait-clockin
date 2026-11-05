@@ -11,9 +11,12 @@
 <body><main class="container">
 <h2>AIT Clockin 差勤打卡</h2>
 <section id="authPanel">
-<p>使用公司配發的 Email 登入（免密碼驗證連結）。</p>
-<input class="field" id="email" type="email" placeholder="公司 Email" autocomplete="email">
-<button class="btn" id="sendLink">寄送登入連結</button>
+<p>使用手機號碼接收簡訊驗證碼登入。</p>
+<input class="field" id="phone" type="tel" placeholder="手機號碼，例如 +886912345678" autocomplete="tel">
+<div id="recaptcha-container"></div>
+<button class="btn" id="sendCode">傳送簡訊驗證碼</button>
+<input class="field" id="smsCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="輸入 6 位數驗證碼" hidden>
+<button class="btn" id="verifyCode" hidden>驗證並登入</button>
 <div class="info" id="authMessage">尚未登入</div>
 </section>
 <section id="clockPanel" hidden>
@@ -31,7 +34,7 @@
 </main>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -46,7 +49,7 @@ const firebaseConfig = {
 const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app);
 const $=id=>document.getElementById(id);
 const targets=[{name:"AIT 台北辦事處",lat:25.02613,lng:121.57915,radius:200},{name:"AIT 高雄分處",lat:22.61053,lng:120.30601,radius:150}];
-let currentUser=null, locationFix=null, qr;
+let currentUser=null, locationFix=null, qr, recaptchaVerifier=null, confirmationResult=null;
 const dateKey=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
 const localStamp=()=>new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",dateStyle:"short",timeStyle:"medium"}).format(new Date());
 function showStatus(msg,type=""){ $("statusBadge").textContent=msg; $("statusBadge").className="status "+type; }
@@ -79,20 +82,41 @@ async function verifyAndSave(kind){
   await refreshRecord();
  }catch(e){showStatus("打卡失敗："+(e.message||"定位或資料庫錯誤"),"error");}
 }
-$("sendLink").addEventListener("click",async()=>{
- const email=$("email").value.trim().toLowerCase();
- if(!email||!email.includes("@")){$("authMessage").textContent="請輸入有效 Email";return;}
- try{await sendSignInLinkToEmail(auth,email,{url:location.href,handleCodeInApp:true});localStorage.setItem("aitClockinEmailForSignIn",email);$("authMessage").textContent="登入連結已寄出，請開啟郵件並在此裝置完成登入。";}
- catch(e){$("authMessage").textContent="寄送失敗："+e.message;}
+function getRecaptcha(){
+ if(!recaptchaVerifier){
+  recaptchaVerifier=new RecaptchaVerifier(auth,"recaptcha-container",{size:"normal"});
+ }
+ return recaptchaVerifier;
+}
+$("sendCode").addEventListener("click",async()=>{
+ const phone=$("phone").value.trim().replace(/[\\s()-]/g,"");
+ if(!/^\\+[1-9]\\d{7,14}$/.test(phone)){
+  $("authMessage").textContent="請輸入含國碼的手機號碼，例如 +886912345678";
+  return;
+ }
+ $("sendCode").disabled=true;
+ try{
+  confirmationResult=await signInWithPhoneNumber(auth,phone,getRecaptcha());
+  $("smsCode").hidden=false;
+  $("verifyCode").hidden=false;
+  $("authMessage").textContent="驗證碼已寄出，請輸入收到的簡訊驗證碼。";
+ }catch(e){
+  $("authMessage").textContent="簡訊寄送失敗："+(e.message||e.code);
+  if(recaptchaVerifier){recaptchaVerifier.clear();recaptchaVerifier=null;}
+ }finally{$("sendCode").disabled=false;}
 });
-if(isSignInWithEmailLink(auth,location.href)){
- let email=localStorage.getItem("aitClockinEmailForSignIn");
- if(!email)email=prompt("請輸入收到登入連結的公司 Email");
- if(email){try{await signInWithEmailLink(auth,email,location.href);localStorage.removeItem("aitClockinEmailForSignIn");history.replaceState({},document.title,location.pathname);}catch(e){$("authMessage").textContent="登入失敗："+e.message;}}
+$("verifyCode").addEventListener("click",async()=>{
+ const code=$("smsCode").value.trim();
+ if(!confirmationResult){$("authMessage").textContent="請先取得簡訊驗證碼。";return;}
+ if(!/^\\d{6}$/.test(code)){$("authMessage").textContent="請輸入 6 位數驗證碼。";return;}
+ try{
+  await confirmationResult.confirm(code);
+  $("authMessage").textContent="手機驗證成功，登入中…";
+ }catch(e){$("authMessage").textContent="驗證失敗："+(e.message||e.code);}
 }
 onAuthStateChanged(auth,async user=>{
  currentUser=user;$("authPanel").hidden=!!user;$("clockPanel").hidden=!user;
- if(user){$("signedEmail").textContent=user.email||"";try{await refreshRecord();}catch(e){$("todayRecord").textContent="紀錄讀取失敗："+e.message;}}
+ if(user){$("signedEmail").textContent=user.phoneNumber||"已驗證手機";try{await refreshRecord();}catch(e){$("todayRecord").textContent="紀錄讀取失敗："+e.message;}}
 });
 $("checkIn").addEventListener("click",()=>verifyAndSave("in"));
 $("checkOut").addEventListener("click",()=>verifyAndSave("out"));
