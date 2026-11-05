@@ -11,7 +11,12 @@
 <body><main class="container">
 <h2>AIT Clockin 差勤打卡</h2>
 <section id="authPanel">
-<p>使用手機號碼接收簡訊驗證碼登入。</p>
+<p>請選擇登入模式。</p>
+<div style="display:flex;gap:8px;margin:10px 0">
+ <button class="btn" id="testModeBtn" type="button" style="flex:1">測試模式</button>
+ <button class="btn secondary" id="liveModeBtn" type="button" style="flex:1">正式簡訊</button>
+</div>
+<div class="info" id="modeHelp">正式模式：向手機發送真實簡訊，需符合 Firebase Phone Auth 的計費與地區設定。</div>
 <input class="field" id="phone" type="tel" placeholder="手機號碼，例如 +886912345678" autocomplete="tel">
 <div id="recaptcha-container"></div>
 <button class="btn" id="sendCode">傳送簡訊驗證碼</button>
@@ -49,7 +54,7 @@ const firebaseConfig = {
 const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app);
 const $=id=>document.getElementById(id);
 const targets=[{name:"AIT 台北辦事處",lat:25.02613,lng:121.57915,radius:200},{name:"AIT 高雄分處",lat:22.61053,lng:120.30601,radius:150}];
-let currentUser=null, locationFix=null, qr, recaptchaVerifier=null, confirmationResult=null;
+let currentUser=null, locationFix=null, qr, recaptchaVerifier=null, confirmationResult=null, authMode="test";
 const dateKey=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
 const localStamp=()=>new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",dateStyle:"short",timeStyle:"medium"}).format(new Date());
 function showStatus(msg,type=""){ $("statusBadge").textContent=msg; $("statusBadge").className="status "+type; }
@@ -106,6 +111,18 @@ async function initializeRecaptcha(){
  }
 }
 initializeRecaptcha();
+function setAuthMode(mode){
+ authMode=mode;
+ $("testModeBtn").className=mode==="test"?"btn":"btn secondary";
+ $("liveModeBtn").className=mode==="live"?"btn":"btn secondary";
+ $("modeHelp").textContent=mode==="test"
+  ?"測試模式：請先在 Firebase Console → Authentication → Sign-in method → Phone → Phone numbers for testing，設定測試電話與固定驗證碼。此模式不會向該測試號碼發送真實簡訊。"
+  :"正式模式：向手機發送真實簡訊，需符合 Firebase Phone Auth 的計費、SMS 地區政策及專案設定。";
+ $("authMessage").textContent=mode==="test"?"目前為測試模式，請使用 Firebase Console 已設定的測試電話號碼與固定驗證碼。":"目前為正式簡訊模式。";
+}
+$("testModeBtn").addEventListener("click",()=>setAuthMode("test"));
+$("liveModeBtn").addEventListener("click",()=>setAuthMode("live"));
+setAuthMode("test");
 $("sendCode").addEventListener("click",async()=>{
  const phone=$("phone").value.trim().replace(/[\s()-]/g,"");
  if(!/^\+[1-9]\d{7,14}$/.test(phone)){
@@ -118,7 +135,9 @@ $("sendCode").addEventListener("click",async()=>{
   await verifier.render();
   confirmationResult=await signInWithPhoneNumber(auth,phone,verifier);
   $("smsCode").focus();
-  $("authMessage").textContent="驗證碼已寄出，請在下方輸入收到的 6 位數簡訊驗證碼。";
+  $("authMessage").textContent=authMode==="test"
+   ?"測試驗證流程已啟動。請輸入 Firebase Console 為此測試電話設定的固定驗證碼（不會收到簡訊）。"
+   :"驗證碼已寄出，請在下方輸入收到的 6 位數簡訊驗證碼。";
  }catch(e){
   $("authMessage").textContent="簡訊寄送失敗："+(e.code||e.message||e);
   if(recaptchaVerifier){recaptchaVerifier.clear();recaptchaVerifier=null;}
