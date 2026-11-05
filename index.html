@@ -89,7 +89,7 @@ function getRecaptcha(){
  return recaptchaVerifier;
 }
 $("sendCode").addEventListener("click",async()=>{
- const phone=$("phone").value.trim().replace(/[\\s()-]/g,"");
+ const phone=$("phone").value.trim().replace(/[\s()-]/g,"");
  if(!/^\+[1-9]\d{7,14}$/.test(phone)){
   $("authMessage").textContent="請輸入含國碼的手機號碼，例如 +886912345678";
   return;
@@ -112,7 +112,7 @@ $("verifyCode").addEventListener("click",async()=>{
   await confirmationResult.confirm(code);
   $("authMessage").textContent="手機驗證成功，登入中…";
  }catch(e){$("authMessage").textContent="驗證失敗："+(e.message||e.code);}
-}
+});
 onAuthStateChanged(auth,async user=>{
  currentUser=user;$("authPanel").hidden=!!user;$("clockPanel").hidden=!user;
  if(user){$("signedEmail").textContent=user.phoneNumber||"已驗證手機";try{await refreshRecord();}catch(e){$("todayRecord").textContent="紀錄讀取失敗："+e.message;}}
