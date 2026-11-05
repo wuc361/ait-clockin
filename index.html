@@ -1,136 +1,104 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIT 差勤驗證</title>
-    <!-- 引入穩定的 QR Code 產生套件 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <style>
-        body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding: 20px; }
-        .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .qr-wrapper { position: relative; margin: 20px auto; width: 200px; height: 200px; padding: 10px; border: 2px solid #003366; background: #fff; }
-        .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 14px; color: rgba(255, 0, 0, 0.4); font-weight: bold; pointer-events: none; width: 100%; }
-        .info { background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; text-align: left; font-size: 13px; }
-        .status-badge { display: inline-block; padding: 10px 20px; border-radius: 20px; font-weight: bold; margin: 15px 0; background: #e0e0e0; }
-        .success { background: #d4edda; color: #155724; }
-        .error { background: #f8d7da; color: #721c24; }
-        .btn { width: 100%; padding: 12px; background: #003366; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
-    </style>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIT Clockin｜差勤打卡</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f2f5;margin:0;padding:18px;color:#18324b}.container{max-width:460px;margin:auto;background:#fff;padding:22px;border-radius:14px;box-shadow:0 4px 16px #0001}h2{text-align:center;margin-top:0}.info{background:#f6f8fa;padding:10px;border-radius:7px;margin:10px 0;font-size:14px;overflow-wrap:anywhere}.field{width:100%;padding:12px;border:1px solid #ccd5df;border-radius:7px;margin:6px 0 10px;font-size:16px}.btn{width:100%;padding:12px;background:#003366;color:#fff;border:0;border-radius:7px;font-weight:bold;margin:6px 0;cursor:pointer}.btn.secondary{background:#64748b}.btn:disabled{opacity:.5}.status{padding:11px;border-radius:8px;background:#edf0f2;margin:12px 0;text-align:center}.success{background:#d4edda;color:#155724}.error{background:#f8d7da;color:#721c24}.qr-wrapper{position:relative;width:220px;height:220px;margin:18px auto;padding:8px;border:2px solid #003366}.watermark{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-25deg);color:#c33a;font-weight:bold;pointer-events:none}small{color:#5c6773}
+</style>
 </head>
-<body>
+<body><main class="container">
+<h2>AIT Clockin 差勤打卡</h2>
+<section id="authPanel">
+<p>使用公司配發的 Email 登入（免密碼驗證連結）。</p>
+<input class="field" id="email" type="email" placeholder="公司 Email" autocomplete="email">
+<button class="btn" id="sendLink">寄送登入連結</button>
+<div class="info" id="authMessage">尚未登入</div>
+</section>
+<section id="clockPanel" hidden>
+<div class="info">登入帳號：<span id="signedEmail"></span></div>
+<div class="info">網路 IP：<span id="wifiIp">偵測中…</span></div>
+<div class="info">GPS：<span id="gpsStatus">尚未讀取</span></div>
+<div class="qr-wrapper"><div id="qrcode"></div><div class="watermark" id="watermarkText">AIT</div></div>
+<small>QR Code 目前由頁面產生，尚未由伺服器驗證。</small>
+<div class="status" id="statusBadge">請先驗證位置</div>
+<button class="btn" id="checkIn">上班打卡</button>
+<button class="btn" id="checkOut">下班打卡</button>
+<button class="btn secondary" id="signOut">登出</button>
+<div class="info" id="todayRecord">今日紀錄讀取中…</div>
+</section>
+</main>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-<div class="container">
-    <h2>AIT 差勤驗證系統</h2>
-    
-    <!-- 浮動動態 QR Code -->
-    <div class="qr-wrapper">
-        <div id="qrcode"></div>
-        <div class="watermark" id="watermarkText">載入中...</div>
-    </div>
-    <div style="font-size: 12px; color: #666; margin-bottom: 15px;">QR Code 每 10 秒自動重整</div>
-
-    <!-- 資訊顯示 -->
-    <div class="info">🌐 Wi-Fi 外部 IP: <span id="wifiIp">偵測中...</span></div>
-    <div class="info">📍 GPS 狀態: <span id="gpsStatus">尚未讀取</span></div>
-
-    <div id="statusBadge" class="status-badge">等待驗證...</div>
-    <button class="btn" onclick="verifyLocation()">立刻驗證位置</button>
-    <div id="phoneResult" style="font-size: 22px; color: green; font-weight: bold; margin-top: 15px; display: none;">📲 0912-345-678</div>
-</div>
-
-<script>
-    // AIT 台北與高雄的真實 GPS 座標範圍
-    const TARGETS = [
-        { name: "AIT 台北辦事處", lat: 25.02613, lng: 121.57915, radius: 200 },
-        { name: "AIT 高雄分處", lat: 22.61053, lng: 120.30601, radius: 150 }
-    ];
-
-    let qrcodeObj;
-
-    // 網頁載入完成後初始化
-    window.onload = function() {
-        qrcodeObj = new QRCode(document.getElementById("qrcode"), {
-    text: "AIT_SECURE_INIT",
-    width: 200,
-    height: 200
+const firebaseConfig = {
+ apiKey:"AIzaSyAHUzmtQblpCAYNGLsG-2-WOslI2qOkRqs",
+ authDomain:"ait-clockin.firebaseapp.com",
+ projectId:"ait-clockin",
+ storageBucket:"ait-clockin.firebasestorage.app",
+ messagingSenderId:"486608755618",
+ appId:"1:486608755618:web:a8f2c39bb508eed277b0fb",
+ measurementId:"G-HTNGTGMPS2"
+};
+const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app);
+const $=id=>document.getElementById(id);
+const targets=[{name:"AIT 台北辦事處",lat:25.02613,lng:121.57915,radius:200},{name:"AIT 高雄分處",lat:22.61053,lng:120.30601,radius:150}];
+let currentUser=null, locationFix=null, qr;
+const dateKey=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+const localStamp=()=>new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",dateStyle:"short",timeStyle:"medium"}).format(new Date());
+function showStatus(msg,type=""){ $("statusBadge").textContent=msg; $("statusBadge").className="status "+type; }
+function recordRef(){return doc(db,"attendance",currentUser.uid+"_"+dateKey());}
+async function refreshRecord(){
+ if(!currentUser)return;
+ const snap=await getDoc(recordRef());
+ if(!snap.exists()){$("todayRecord").textContent="今日尚無打卡紀錄";return;}
+ const d=snap.data();
+ $("todayRecord").textContent="今日紀錄｜上班："+(d.checkIn?.displayTime||"尚未打卡")+"｜下班："+(d.checkOut?.displayTime||"尚未打卡");
+}
+function distanceMeters(a,b){const R=6371000,rad=x=>x*Math.PI/180,dLat=rad(b.lat-a.lat),dLng=rad(b.lng-a.lng);const q=Math.sin(dLat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));}
+function getPosition(){return new Promise((resolve,reject)=>{if(!navigator.geolocation)return reject(Error("瀏覽器不支援定位"));navigator.geolocation.getCurrentPosition(resolve,reject,{enableHighAccuracy:true,timeout:12000,maximumAge:0});});}
+async function verifyAndSave(kind){
+ if(!currentUser)return showStatus("請先登入","error");
+ try{
+  showStatus("正在取得 GPS…");
+  const pos=await getPosition(),coords={lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:pos.coords.accuracy};
+  $("gpsStatus").textContent=coords.lat.toFixed(5)+", "+coords.lng.toFixed(5)+"（精度約 "+Math.round(coords.accuracy)+"m）";
+  const match=targets.map(t=>({...t,distance:distanceMeters(coords,t)})).find(t=>t.distance<=t.radius);
+  if(!match){locationFix=null;showStatus("定位不在 AIT 核准範圍內，未儲存","error");return;}
+  locationFix={...coords,site:match.name,distanceMeters:Math.round(match.distance)};
+  const ref=recordRef(),snap=await getDoc(ref),old=snap.exists()?snap.data():{};
+  const field=kind==="in"?"checkIn":"checkOut";
+  if(old[field]){showStatus((kind==="in"?"上班":"下班")+"打卡已存在，避免重複寫入","error");return;}
+  if(kind==="out"&&!old.checkIn){showStatus("尚無上班紀錄，請先完成上班打卡","error");return;}
+  const entry={displayTime:localStamp(),timestamp:serverTimestamp(),gps:locationFix};
+  await setDoc(ref,{uid:currentUser.uid,email:currentUser.email,date:dateKey(),[field]:entry,updatedAt:serverTimestamp()},{merge:true});
+  showStatus((kind==="in"?"上班":"下班")+"打卡已儲存｜"+match.name,"success");
+  await refreshRecord();
+ }catch(e){showStatus("打卡失敗："+(e.message||"定位或資料庫錯誤"),"error");}
+}
+$("sendLink").addEventListener("click",async()=>{
+ const email=$("email").value.trim().toLowerCase();
+ if(!email||!email.includes("@")){$("authMessage").textContent="請輸入有效 Email";return;}
+ try{await sendSignInLinkToEmail(auth,email,{url:location.href,handleCodeInApp:true});localStorage.setItem("aitClockinEmailForSignIn",email);$("authMessage").textContent="登入連結已寄出，請開啟郵件並在此裝置完成登入。";}
+ catch(e){$("authMessage").textContent="寄送失敗："+e.message;}
 });
-        
-        // 啟動每 10 秒更新動態 QR Code
-        setInterval(updateQR, 10000);
-        updateQR();
-        
-        // 抓取外部 IP
-        fetch('https://api.ipify.org?format=json')
-            .then(res => res.json())
-            .then(data => { document.getElementById("wifiIp").innerText = data.ip; })
-            .catch(() => { document.getElementById("wifiIp").innerText = "無法取得 IP"; });
-    };
-
-    // 更新動態防代打卡條碼
-    function updateQR() {
-        if (!qrcodeObj) return;
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString('zh-TW', { hour12: false });
-        const token = Math.random().toString(36).substring(2, 7).toUpperCase();
-        
-        qrcodeObj.makeCode("AIT_SECURE_" + now.getTime() + "_" + token);
-        document.getElementById("watermarkText").innerText = timeStr + " " + token;
-    }
-
-    // 驗證定位
-    function verifyLocation() {
-        const badge = document.getElementById("statusBadge");
-        const gpsStatus = document.getElementById("gpsStatus");
-        const phone = document.getElementById("phoneResult");
-
-        badge.innerText = "驗證中...";
-        badge.className = "status-badge";
-        phone.style.display = "none";
-
-        if (!navigator.geolocation) {
-            badge.innerText = "位置異常：手機不支援 GPS";
-            badge.className = "status-badge error";
-            return;
-        }
-
-        navigator.geolocation.getCurrentPosition((pos) => {
-            const uLat = pos.coords.latitude;
-            const uLng = pos.coords.longitude;
-            gpsStatus.innerText = uLat.toFixed(4) + ", " + uLng.toFixed(4);
-
-            let isMatch = false;
-            for (let target of TARGETS) {
-                // Haversine 公式計算距離
-                const R = 6371e3;
-                const dLat = (target.lat - uLat) * Math.PI / 180;
-                const dLng = (target.lng - uLng) * Math.PI / 180;
-                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                          Math.cos(uLat*Math.PI/180) * Math.cos(target.lat*Math.PI/180) *
-                          Math.sin(dLng/2) * Math.sin(dLng/2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                const distance = R * c;
-
-                if (distance <= target.radius) {
-                    isMatch = true;
-                    badge.innerText = "驗證成功：" + target.name;
-                    badge.className = "status-badge success";
-                    phone.style.display = "block";
-                    break;
-                }
-            }
-
-            if (!isMatch) {
-                badge.innerText = "位置異常：不在 AIT 核准範圍內";
-                badge.className = "status-badge error";
-            }
-
-        }, () => {
-            badge.innerText = "位置異常：GPS 讀取失敗或未授權";
-            badge.className = "status-badge error";
-        }, { enableHighAccuracy: true, timeout: 8000 });
-    }
+if(isSignInWithEmailLink(auth,location.href)){
+ let email=localStorage.getItem("aitClockinEmailForSignIn");
+ if(!email)email=prompt("請輸入收到登入連結的公司 Email");
+ if(email){try{await signInWithEmailLink(auth,email,location.href);localStorage.removeItem("aitClockinEmailForSignIn");history.replaceState({},document.title,location.pathname);}catch(e){$("authMessage").textContent="登入失敗："+e.message;}}
+}
+onAuthStateChanged(auth,async user=>{
+ currentUser=user;$("authPanel").hidden=!!user;$("clockPanel").hidden=!user;
+ if(user){$("signedEmail").textContent=user.email||"";try{await refreshRecord();}catch(e){$("todayRecord").textContent="紀錄讀取失敗："+e.message;}}
+});
+$("checkIn").addEventListener("click",()=>verifyAndSave("in"));
+$("checkOut").addEventListener("click",()=>verifyAndSave("out"));
+$("signOut").addEventListener("click",()=>signOut(auth));
+fetch("https://api.ipify.org?format=json").then(r=>r.json()).then(d=>$("wifiIp").textContent=d.ip).catch(()=>$("wifiIp").textContent="無法取得");
+if(window.QRCode){qr=new QRCode($("qrcode"),{text:"AIT Clockin QR 尚未經伺服器驗證",width:200,height:200});}
+setInterval(()=>{const stamp=new Date().toLocaleTimeString("zh-TW",{hour12:false});$("watermarkText").textContent=stamp;},10000);
 </script>
-
-</body>
-</html>
+</body></html>
