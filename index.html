@@ -84,10 +84,28 @@ async function verifyAndSave(kind){
 }
 function getRecaptcha(){
  if(!recaptchaVerifier){
-  recaptchaVerifier=new RecaptchaVerifier(auth,"recaptcha-container",{size:"normal"});
+  recaptchaVerifier=new RecaptchaVerifier(auth,"recaptcha-container",{
+   size:"normal",
+   callback:()=>{$("authMessage").textContent="人機驗證完成，可以傳送簡訊驗證碼。";},
+   "expired-callback":()=>{$("authMessage").textContent="人機驗證已過期，請重新勾選。";}
+  });
  }
  return recaptchaVerifier;
 }
+async function initializeRecaptcha(){
+ $("authMessage").textContent="正在載入 Google 人機驗證…";
+ $("sendCode").disabled=true;
+ try{
+  await getRecaptcha().render();
+  $("authMessage").textContent="請先勾選「我不是機器人」，再傳送簡訊驗證碼。";
+ }catch(e){
+  $("authMessage").textContent="人機驗證載入失敗："+(e.code||e.message||e);
+  if(recaptchaVerifier){recaptchaVerifier.clear();recaptchaVerifier=null;}
+ }finally{
+  $("sendCode").disabled=false;
+ }
+}
+initializeRecaptcha();
 $("sendCode").addEventListener("click",async()=>{
  const phone=$("phone").value.trim().replace(/[\s()-]/g,"");
  if(!/^\+[1-9]\d{7,14}$/.test(phone)){
@@ -96,11 +114,13 @@ $("sendCode").addEventListener("click",async()=>{
  }
  $("sendCode").disabled=true;
  try{
-  confirmationResult=await signInWithPhoneNumber(auth,phone,getRecaptcha());
+  const verifier=getRecaptcha();
+  await verifier.render();
+  confirmationResult=await signInWithPhoneNumber(auth,phone,verifier);
   $("smsCode").focus();
   $("authMessage").textContent="驗證碼已寄出，請在下方輸入收到的 6 位數簡訊驗證碼。";
  }catch(e){
-  $("authMessage").textContent="簡訊寄送失敗："+(e.message||e.code);
+  $("authMessage").textContent="簡訊寄送失敗："+(e.code||e.message||e);
   if(recaptchaVerifier){recaptchaVerifier.clear();recaptchaVerifier=null;}
  }finally{$("sendCode").disabled=false;}
 });
