@@ -107,7 +107,7 @@ $("sendCode").addEventListener("click",async()=>{
 $("verifyCode").addEventListener("click",async()=>{
  const code=$("smsCode").value.trim();
  if(!confirmationResult){$("authMessage").textContent="請先取得簡訊驗證碼。";return;}
- if(!/^\\d{6}$/.test(code)){$("authMessage").textContent="請輸入 6 位數驗證碼。";return;}
+ if(!/^\d{6}$/.test(code)){$("authMessage").textContent="請輸入 6 位數驗證碼。";return;}
  try{
   await confirmationResult.confirm(code);
   $("authMessage").textContent="手機驗證成功，登入中…";
