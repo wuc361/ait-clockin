@@ -15,8 +15,8 @@
 <input class="field" id="phone" type="tel" placeholder="手機號碼，例如 +886912345678" autocomplete="tel">
 <div id="recaptcha-container"></div>
 <button class="btn" id="sendCode">傳送簡訊驗證碼</button>
-<input class="field" id="smsCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="輸入 6 位數驗證碼" hidden>
-<button class="btn" id="verifyCode" hidden>驗證並登入</button>
+<input class="field" id="smsCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="收到簡訊後，輸入 6 位數驗證碼" maxlength="6">
+<button class="btn" id="verifyCode">驗證並登入</button>
 <div class="info" id="authMessage">尚未登入</div>
 </section>
 <section id="clockPanel" hidden>
@@ -90,16 +90,15 @@ function getRecaptcha(){
 }
 $("sendCode").addEventListener("click",async()=>{
  const phone=$("phone").value.trim().replace(/[\\s()-]/g,"");
- if(!/^\\+[1-9]\\d{7,14}$/.test(phone)){
+ if(!/^\+[1-9]\d{7,14}$/.test(phone)){
   $("authMessage").textContent="請輸入含國碼的手機號碼，例如 +886912345678";
   return;
  }
  $("sendCode").disabled=true;
  try{
   confirmationResult=await signInWithPhoneNumber(auth,phone,getRecaptcha());
-  $("smsCode").hidden=false;
-  $("verifyCode").hidden=false;
-  $("authMessage").textContent="驗證碼已寄出，請輸入收到的簡訊驗證碼。";
+  $("smsCode").focus();
+  $("authMessage").textContent="驗證碼已寄出，請在下方輸入收到的 6 位數簡訊驗證碼。";
  }catch(e){
   $("authMessage").textContent="簡訊寄送失敗："+(e.message||e.code);
   if(recaptchaVerifier){recaptchaVerifier.clear();recaptchaVerifier=null;}
